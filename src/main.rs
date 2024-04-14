@@ -1,14 +1,12 @@
 use std::collections::HashMap;
 use std::env;
-use std::future::Future;
-use std::pin::Pin;
-use std::task::Poll;
+use std::sync::Arc;
 
 use aws_lambda_events::encodings::Body;
 use aws_lambda_events::event::apigw::{ApiGatewayProxyRequest, ApiGatewayProxyResponse};
 use aws_lambda_events::http::{HeaderMap, HeaderName};
 use base64::prelude::*;
-use lambda_runtime::{LambdaEvent, Service};
+use lambda_runtime::{service_fn, LambdaEvent};
 use rusoto_core::Region;
 use rusoto_dynamodb::{
     AttributeValue, DeleteItemInput, DynamoDb, DynamoDbClient, GetItemInput, PutItemInput,
@@ -24,28 +22,7 @@ struct Vault {
     encrypted_vault: String,
 }
 
-struct ServiceWrapper<'a> {
-    handler: &'a SecuboxHandler,
-}
-
-impl<'a> Service<LambdaEvent<ApiGatewayProxyRequest>> for ServiceWrapper<'a> {
-    type Response = ApiGatewayProxyResponse;
-    type Error = ApiError;
-    type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + 'a>>;
-
-    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, event: LambdaEvent<ApiGatewayProxyRequest>) -> Self::Future {
-        async fn call(handler: &SecuboxHandler, req: ApiGatewayProxyRequest) -> Result<ApiGatewayProxyResponse, ApiError> {
-            handler.handle(req).await
-        }
-        Box::pin(call(self.handler, event.payload))
-    }
-}
-
-struct SecuboxHandler {
+struct SecuboxService {
     client: DynamoDbClient,
     salt: Vec<u8>,
     vault_table: String,
@@ -69,7 +46,7 @@ enum ApiError {
     DynamodbDeleteError(#[from] rusoto_core::RusotoError<rusoto_dynamodb::DeleteItemError>),
 }
 
-impl SecuboxHandler {
+impl SecuboxService {
     async fn handle(
         &self,
         req: ApiGatewayProxyRequest,
@@ -84,54 +61,57 @@ impl SecuboxHandler {
                 status_code: 200,
                 headers: cors(),
                 multi_value_headers: Default::default(),
-                body: Some(
-                    Body::Text(json!({
-                        "version": "1.0.0",
+                body: Some(Body::Text(
+                    json!({
+                        "version": "1.0.2",
                         "language": "Rust",
                         "author": "Jeffrey Bolle"
                     })
-                        .to_string()),
-                ),
+                    .to_string(),
+                )),
                 is_base64_encoded: false,
             });
         }
 
-        match self.try_handle(req.http_method.as_str(), key, req.body).await {
+        match self
+            .try_handle(req.http_method.as_str(), key, req.body)
+            .await
+        {
             Ok(resp) => Ok(resp),
             Err(ApiError::InvalidRequest) => Ok(ApiGatewayProxyResponse {
                 status_code: 400,
                 headers: cors(),
                 multi_value_headers: Default::default(),
-                body: Some(
-                    Body::Text(json!({
+                body: Some(Body::Text(
+                    json!({
                         "error": "Invalid Request",
                     })
-                                   .to_string(),
-                    )),
+                    .to_string(),
+                )),
                 is_base64_encoded: false,
             }),
             Err(ApiError::KeyNotFound) => Ok(ApiGatewayProxyResponse {
                 status_code: 404,
                 headers: cors(),
                 multi_value_headers: Default::default(),
-                body: Some(
-                    Body::Text(json!({
+                body: Some(Body::Text(
+                    json!({
                         "error": "Key Not Found",
                     })
-                        .to_string()),
-                ),
+                    .to_string(),
+                )),
                 is_base64_encoded: false,
             }),
             Err(_) => Ok(ApiGatewayProxyResponse {
                 status_code: 500,
                 headers: cors(),
                 multi_value_headers: Default::default(),
-                body: Some(
-                    Body::Text(json!({
+                body: Some(Body::Text(
+                    json!({
                         "error": "Unknown Error",
                     })
-                        .to_string()),
-                ),
+                    .to_string(),
+                )),
                 is_base64_encoded: false,
             }),
         }
@@ -188,7 +168,9 @@ impl SecuboxHandler {
             "EncryptedVault".to_string(),
             AttributeValue {
                 b: Some(bytes::Bytes::copy_from_slice(
-                    BASE64_STANDARD.decode(vault.encrypted_vault.as_bytes())?.as_slice(),
+                    BASE64_STANDARD
+                        .decode(vault.encrypted_vault.as_bytes())?
+                        .as_slice(),
                 )),
                 ..Default::default()
             },
@@ -281,18 +263,28 @@ impl SecuboxHandler {
 
 fn cors() -> HeaderMap {
     let mut headers = HeaderMap::new();
-    headers.insert::<HeaderName>("Access-Control-Allow-Origin".try_into().unwrap(), "*".try_into().unwrap());
+    headers.insert::<HeaderName>(
+        "Access-Control-Allow-Origin".try_into().unwrap(),
+        "*".try_into().unwrap(),
+    );
     headers
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    let handler = SecuboxHandler {
+    let service = Arc::new(SecuboxService {
         client: DynamoDbClient::new(Region::EuWest2),
         salt: hex::decode(env::var("SALT")?)?,
         vault_table: env::var("VAULT_TABLE")?,
-    };
+    });
 
-    lambda_runtime::run(ServiceWrapper { handler: &handler }).await?;
+    lambda_runtime::run(service_fn(
+        move |event: LambdaEvent<ApiGatewayProxyRequest>| {
+            let service = Arc::clone(&service);
+            async move { service.handle(event.payload).await }
+        },
+    ))
+    .await?;
+
     Ok(())
 }

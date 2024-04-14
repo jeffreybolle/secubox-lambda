@@ -1,91 +1,11 @@
-    1  cd /vol
-    2  ls
-    3  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+docker run -it -v /path/to/project:/vol amazonlinux:2023 /bin/bash
+    1  yum install tar xz gcc perl make
+    2  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    3  . "$HOME/.cargo/env"
     4  cargo install cargo-lambda
-    5  . "$HOME/.cargo/env"
-    6  cargo install cargo-lambda
-    7  yum install gcc
-    8  cargo install cargo-lambda
+    5  cd /opt
+    6  curl https://ziglang.org/download/0.11.0/zig-linux-x86_64-0.11.0.tar.xz --output zig-linux-x86_64-0.11.0.tar.xz
+    7  tar -xJf zig-linux-x86_64-0.11.0.tar.xz
+    8  export PATH=$PATH:/opt/zig-linux-x86_64-0.11.0
     9  cd /vol
-   10  ls
-   11  cargo lambda build --release --arm64
-   12  yum install zig
-   13  cd /opt
-   14  ls
-   15  wget https://ziglang.org/builds/zig-linux-x86_64-0.12.0-dev.3652+a59ad719d.tar.xz
-   16  curl
-   17  curl https://ziglang.org/builds/zig-linux-x86_64-0.12.0-dev.3652+a59ad719d.tar.xz --output zig-linux-x86_64-0.12.0-dev.3652+a59ad719d.tar.xz
-   18  ls
-   19  tar -xzf zig-linux-x86_64-0.12.0-dev.3652+a59ad719d.tar.xz 
-   20  yum install tar
-   21  tar -xzf zig-linux-x86_64-0.12.0-dev.3652+a59ad719d.tar.xz 
-   22  yum install xz-utils
-   23  yum install gzip
-   24  tar -xzf zig-linux-x86_64-0.12.0-dev.3652+a59ad719d.tar.xz 
-   25  yum search xz
-   26  yum install xz
-   27  tar -xzf zig-linux-x86_64-0.12.0-dev.3652+a59ad719d.tar.xz 
-   28  tar -xJzf zig-linux-x86_64-0.12.0-dev.3652+a59ad719d.tar.xz 
-   29  man tar
-   30  tar --help
-   31  tar -xJf zig-linux-x86_64-0.12.0-dev.3652+a59ad719d.tar.xz 
-   32  ls
-   33  cd zig-linux-x86_64-0.12.0-dev.3652+a59ad719d
-   34  ls
-   35  ./zig
-   36  cd /vol
-   37  echo $PATH
-   38  export PATH=$PATH:/opt/zig-linux-x86_64-0.12.0-dev.3652+a59ad719d
-   39  echo $PATH
-   40  zig
-   41  cargo lambda build --release --arm64
-   42  cargo lambda build --release
-   43  yum instll libssl-dev
-   44  yum install libssl-dev
-   45  yum install openssl-devel
-   46  cargo lambda build --release --arm64
-   47  cargo lambda build --release
-   48  sudo yum install openssl-devel
-   49  yum install openssl-static
-   50  yum install openssl-devel
-   51  cargo lambda build --release
-   52  yum install libssl
-   53  yum install libssl-devel
-   54  yum search libssl
-   55  cargo tree
-   56  cargo tree | grep ssl
-   57  cargo tree | grep -B 10 ssl
-   58  cargo tree 
-   59  cargo tree 
-   60  cargo tree 
-   61  cargo tree | grep -B 10 ssl
-   62  cargo tree | grep -B 20 ssl
-   63  cargo tree | less
-   64  yum install less
-   65  cargo tree | less
-   66  cargo tree | less -R
-   67  cargo tree | less -r
-   68  cargo lambda build --release
-   69  ls /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/openssl-src-111.28.1+1.1.1w/
-   70  ls /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/openssl-src-111.28.1+1.1.1w/src/lib.rs 
-   71  less ls /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/openssl-src-111.28.1+1.1.1w/src/lib.rs 
-   72  less /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/openssl-src-111.28.1+1.1.1w/src/lib.rs 
-   73  less /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/openssl-src-111.28.1+1.1.1w/src/lib.rs 
-   74  vi /root/.cargo/registry/src/index.crates.io-6f17d22bba15001f/openssl-src-111.28.1+1.1.1w/src/lib.rs 
-   75  ls /root/.cache/cargo-zigbuild/0.17.5/zigcc-x86_64-unknown-linux-gnu.sh
-   76  ls /vol/target/x86_64-unknown-linux-gnu/release/build/openssl-sys-d7db76cd33d9ef68/out/openssl-build/build/src/Configure 
-   77  vim /vol/target/x86_64-unknown-linux-gnu/release/build/openssl-sys-d7db76cd33d9ef68/out/openssl-build/build/src/Configure 
-   78  vi /vol/target/x86_64-unknown-linux-gnu/release/build/openssl-sys-d7db76cd33d9ef68/out/openssl-build/build/src/Configure 
-   79  cargo lambda build --release
-   80  cd "/vol/target/x86_64-unknown-linux-gnu/release/build/openssl-sys-d7db76cd33d9ef68/out/openssl-build/build/src" && env -u CROSS_COMPILE AR="ar" CC="/root/.cache/cargo-zigbuild/0.17.5/zigcc-x86_64-unknown-linux-gnu.sh" RANLIB="/root/.cache/cargo-zigbuild/0.17.5/zigranlib.sh" "perl" "./Configure" "--prefix=/vol/target/x86_64-unknown-linux-gnu/release/build/openssl-sys-d7db76cd33d9ef68/out/openssl-build/install" "--openssldir=/usr/local/ssl" "no-dso" "no-shared" "no-ssl3" "no-unit-test" "no-comp" "no-zlib" "no-zlib-dynamic" "no-md2" "no-rc5" "no-weak-ssl-ciphers" "no-camellia" "no-idea" "no-seed" "linux-x86_64" "-O2" "-ffunction-sections" "-fdata-sections" "-fPIC" "-m64" "--target=x86_64-unknown-linux-gnu"
-   81  yum install perl
-   82  cargo lambda build --release
-   83  ls
-   84  cd -
-   85  cargo lambda build --release
-   86  yum install make
-   87  cargo lambda build --release
-   88  cargo lambda build --release --arm64
-   89  ls
-   90  history
-   91  history > bash
+   10  cargo lambda build --release --arm64
