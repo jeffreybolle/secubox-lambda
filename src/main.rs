@@ -1,5 +1,14 @@
+use std::collections::HashMap;
+use std::env;
+use std::future::Future;
+use std::pin::Pin;
+use std::task::Poll;
+
+use aws_lambda_events::encodings::Body;
 use aws_lambda_events::event::apigw::{ApiGatewayProxyRequest, ApiGatewayProxyResponse};
-use lambda::{Context, Handler};
+use aws_lambda_events::http::{HeaderMap, HeaderName};
+use base64::prelude::*;
+use lambda_runtime::{LambdaEvent, Service};
 use rusoto_core::Region;
 use rusoto_dynamodb::{
     AttributeValue, DeleteItemInput, DynamoDb, DynamoDbClient, GetItemInput, PutItemInput,
@@ -7,9 +16,6 @@ use rusoto_dynamodb::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha3::Digest;
-use std::collections::HashMap;
-use std::env;
-use std::pin;
 use thiserror::Error;
 
 #[derive(Serialize, Deserialize)]
@@ -18,24 +24,24 @@ struct Vault {
     encrypted_vault: String,
 }
 
-struct HandlerWrapper<'a> {
+struct ServiceWrapper<'a> {
     handler: &'a SecuboxHandler,
 }
 
-impl<'a> Handler<ApiGatewayProxyRequest, ApiGatewayProxyResponse> for HandlerWrapper<'a> {
+impl<'a> Service<LambdaEvent<ApiGatewayProxyRequest>> for ServiceWrapper<'a> {
+    type Response = ApiGatewayProxyResponse;
     type Error = ApiError;
-    type Fut = pin::Pin<
-        Box<dyn std::future::Future<Output = Result<ApiGatewayProxyResponse, ApiError>> + 'a>,
-    >;
-    fn call(&mut self, req: ApiGatewayProxyRequest, ctx: Context) -> Self::Fut {
-        async fn call(
-            handler: &SecuboxHandler,
-            req: ApiGatewayProxyRequest,
-            ctx: Context,
-        ) -> Result<ApiGatewayProxyResponse, ApiError> {
-            handler.handle(req, ctx).await
+    type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + 'a>>;
+
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, event: LambdaEvent<ApiGatewayProxyRequest>) -> Self::Future {
+        async fn call(handler: &SecuboxHandler, req: ApiGatewayProxyRequest) -> Result<ApiGatewayProxyResponse, ApiError> {
+            handler.handle(req).await
         }
-        Box::pin(call(self.handler, req, ctx))
+        Box::pin(call(self.handler, event.payload))
     }
 }
 
@@ -43,8 +49,6 @@ struct SecuboxHandler {
     client: DynamoDbClient,
     salt: Vec<u8>,
     vault_table: String,
-    #[allow(dead_code)]
-    stats_table: String,
 }
 
 #[derive(Error, Debug)]
@@ -69,7 +73,6 @@ impl SecuboxHandler {
     async fn handle(
         &self,
         req: ApiGatewayProxyRequest,
-        _ctx: Context,
     ) -> Result<ApiGatewayProxyResponse, ApiError> {
         let key: &str = match req.path_parameters.get("key") {
             Some(key) => key,
@@ -82,69 +85,69 @@ impl SecuboxHandler {
                 headers: cors(),
                 multi_value_headers: Default::default(),
                 body: Some(
-                    json!({
+                    Body::Text(json!({
                         "version": "1.0.0",
                         "language": "Rust",
                         "author": "Jeffrey Bolle"
                     })
-                    .to_string(),
+                        .to_string()),
                 ),
-                is_base64_encoded: Some(false),
+                is_base64_encoded: false,
             });
         }
 
-        match self.try_handle(req.http_method.as_deref(), key, req.body).await {
+        match self.try_handle(req.http_method.as_str(), key, req.body).await {
             Ok(resp) => Ok(resp),
             Err(ApiError::InvalidRequest) => Ok(ApiGatewayProxyResponse {
                 status_code: 400,
                 headers: cors(),
                 multi_value_headers: Default::default(),
                 body: Some(
-                    json!({
+                    Body::Text(json!({
                         "error": "Invalid Request",
                     })
-                    .to_string(),
-                ),
-                is_base64_encoded: Some(false),
+                                   .to_string(),
+                    )),
+                is_base64_encoded: false,
             }),
             Err(ApiError::KeyNotFound) => Ok(ApiGatewayProxyResponse {
                 status_code: 404,
                 headers: cors(),
                 multi_value_headers: Default::default(),
                 body: Some(
-                    json!({
+                    Body::Text(json!({
                         "error": "Key Not Found",
                     })
-                    .to_string(),
+                        .to_string()),
                 ),
-                is_base64_encoded: Some(false),
+                is_base64_encoded: false,
             }),
             Err(_) => Ok(ApiGatewayProxyResponse {
                 status_code: 500,
                 headers: cors(),
                 multi_value_headers: Default::default(),
                 body: Some(
-                    json!({
+                    Body::Text(json!({
                         "error": "Unknown Error",
                     })
-                    .to_string(),
+                        .to_string()),
                 ),
-                is_base64_encoded: Some(false),
+                is_base64_encoded: false,
             }),
         }
     }
 
     async fn try_handle(
         &self,
-        method: Option<&str>,
+        method: &str,
         key: &str,
         body: Option<String>,
     ) -> Result<ApiGatewayProxyResponse, ApiError> {
         let storage_key = self.calculate_storage_key(key);
         match method {
-            Some("GET") => self.get(&storage_key).await,
-            Some("PUT") => self.put(&storage_key, body).await,
-            Some("DELETE") => self.delete(&storage_key).await,
+            "GET" => self.get(&storage_key).await,
+            "PUT" => self.put(&storage_key, body).await,
+            "DELETE" => self.delete(&storage_key).await,
             _ => Err(ApiError::InvalidRequest),
         }
     }
@@ -158,8 +161,8 @@ impl SecuboxHandler {
             status_code: 200,
             headers: cors(),
             multi_value_headers: Default::default(),
-            body: Some(body),
-            is_base64_encoded: Some(false),
+            body: Some(Body::Text(body)),
+            is_base64_encoded: false,
         })
     }
 
@@ -185,7 +188,7 @@ impl SecuboxHandler {
             "EncryptedVault".to_string(),
             AttributeValue {
                 b: Some(bytes::Bytes::copy_from_slice(
-                    base64::decode(vault.encrypted_vault)?.as_slice(),
+                    BASE64_STANDARD.decode(vault.encrypted_vault.as_bytes())?.as_slice(),
                 )),
                 ..Default::default()
             },
@@ -204,7 +207,7 @@ impl SecuboxHandler {
             headers: cors(),
             multi_value_headers: Default::default(),
             body: None,
-            is_base64_encoded: Some(false),
+            is_base64_encoded: false,
         })
     }
 
@@ -231,7 +234,7 @@ impl SecuboxHandler {
             headers: cors(),
             multi_value_headers: Default::default(),
             body: None,
-            is_base64_encoded: Some(false),
+            is_base64_encoded: false,
         })
     }
 
@@ -258,7 +261,7 @@ impl SecuboxHandler {
             if let Some(item) = result.item {
                 if let Some(property) = item.get("EncryptedVault") {
                     if let Some(vault_binary) = &property.b {
-                        return Ok(base64::encode(vault_binary));
+                        return Ok(BASE64_STANDARD.encode(vault_binary));
                     }
                 }
             }
@@ -276,9 +279,9 @@ impl SecuboxHandler {
     }
 }
 
-fn cors() -> HashMap<String, String> {
-    let mut headers = HashMap::new();
-    headers.insert(String::from("Access-Control-Allow-Origin"), String::from("*"));
+fn cors() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert::<HeaderName>("Access-Control-Allow-Origin".try_into().unwrap(), "*".try_into().unwrap());
     headers
 }
 
@@ -288,8 +291,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
         client: DynamoDbClient::new(Region::EuWest2),
         salt: hex::decode(env::var("SALT")?)?,
         vault_table: env::var("VAULT_TABLE")?,
-        stats_table: env::var("STATS_TABLE")?,
     };
-    lambda::run(HandlerWrapper { handler: &handler }).await?;
+
+    lambda_runtime::run(ServiceWrapper { handler: &handler }).await?;
     Ok(())
 }
